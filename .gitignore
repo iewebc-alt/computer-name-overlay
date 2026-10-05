@@ -1,0 +1,9 @@
+/artifacts/
+/local/
+*.user
+*.suo
+.vs/
+*.pfx
+*.p12
+*.key
+.env
