@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Initial-release template. Validate in the approved SignPath project before use. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="ComputerNameOverlay.exe"
+             product-name="Computer Name Overlay"
+             product-version="0.1.0"
+             file-version="0.1.0.0">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

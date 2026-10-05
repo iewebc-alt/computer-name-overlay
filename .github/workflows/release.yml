@@ -1,0 +1,72 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: windows-2022
+    environment: release
+    timeout-minutes: 50
+    permissions:
+      contents: write
+      actions: read
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build and test tagged source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          ./build.ps1
+          ./test.ps1
+          $version = [Diagnostics.FileVersionInfo]::GetVersionInfo("$PWD/artifacts/unsigned/ComputerNameOverlay.exe").ProductVersion
+          if ($env:RELEASE_TAG -ne "v$version") { throw 'Tag and binary version differ.' }
+      - name: Upload signing input
+        id: unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: unsigned-binary
+          path: artifacts/unsigned/ComputerNameOverlay.exe
+          if-no-files-found: error
+      - name: Sign after Foundation approval
+        if: vars.SIGNPATH_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 2400
+          output-artifact-directory: artifacts/signed
+      - name: Package release
+        env:
+          SIGNING_ENABLED: ${{ vars.SIGNPATH_ENABLED }}
+        run: |
+          if ($env:SIGNING_ENABLED -eq 'true') { ./package.ps1 -Signed }
+          else { ./package.ps1 }
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ github.sha }}
+          SIGNING_ENABLED: ${{ vars.SIGNPATH_ENABLED }}
+        run: |
+          $state = if ($env:SIGNING_ENABLED -eq 'true') { 'signed' } else { 'unsigned' }
+          $notes = Get-Content docs/RELEASE_NOTES.md -Raw
+          $notes += "`nSigning state: $state.`nSource commit: $env:SOURCE_COMMIT.`n"
+          $notes += "`n[Code signing policy](https://github.com/$env:GH_REPO/blob/$env:RELEASE_TAG/CODE_SIGNING.md)`n"
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [IO.File]::WriteAllText($notesPath, $notes, (New-Object Text.UTF8Encoding $false))
+          $assets = @(Get-ChildItem artifacts/release -File | ForEach-Object { $_.FullName })
+          & gh release create $env:RELEASE_TAG @assets --verify-tag --title "Computer Name Overlay $env:RELEASE_TAG ($state)" --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed.' }
